@@ -6,21 +6,23 @@
 
 namespace clinq
 {
-template <typename ITERATOR, typename PREDICATE, typename ITEM>
-class FitleredIterator
+template <typename ITERATOR, typename PREDICATE>
+class IteratorWithFilter
 {
+	typedef typename std::remove_reference<decltype(*std::declval<ITERATOR>())>::type ITEM;
+
 	ITERATOR current;
 	ITERATOR end;
 	PREDICATE predicate;
 
 public:
-	FitleredIterator(const ITERATOR& current, const ITERATOR& end, const PREDICATE& predicate)
+	IteratorWithFilter(const ITERATOR& current, const ITERATOR& end, const PREDICATE& predicate)
 		: current(current),
 		  end(end),
 		  predicate(predicate) {
 	}
 
-	bool operator!=(const FitleredIterator<ITERATOR, PREDICATE, ITEM>& other) const {
+	bool operator!=(const IteratorWithFilter<ITERATOR, PREDICATE>& other) const {
 		return current != other.current;
 	}
 
@@ -28,8 +30,8 @@ public:
 		return *current;
 	}
 
-	const FitleredIterator& operator++() {
-		if (current == end)
+	const IteratorWithFilter& operator++() {
+		if (!(current != end))
 			return *this;
 
 		do {
@@ -41,21 +43,21 @@ public:
 };
 
 
-template <typename ITERATOR, typename TRANSFORM, typename ITEM>
-class TransformedIterator
+template <typename ITERATOR, typename TRANSFORM>
+class IteratorWithTransform
 {
+	typedef typename std::result_of<TRANSFORM(decltype(*std::declval<ITERATOR>()))>::type ITEM;
+
 	ITERATOR current;
-	ITERATOR end;
 	TRANSFORM transform;
 
 public:
-	TransformedIterator(const ITERATOR& current, const ITERATOR& end, TRANSFORM transform)
+	IteratorWithTransform(const ITERATOR& current, TRANSFORM transform)
 		: current(current),
-		  end(end),
 		  transform(transform) {
 	}
 
-	bool operator!=(const TransformedIterator<ITERATOR, TRANSFORM, ITEM>& other) const {
+	bool operator!=(const IteratorWithTransform<ITERATOR, TRANSFORM>& other) const {
 		return current != other.current;
 	}
 
@@ -63,16 +65,92 @@ public:
 		return transform(*current);
 	}
 
-	const TransformedIterator& operator++() {
+	const IteratorWithTransform& operator++() {
 		++current;
 		return *this;
 	}
 };
 
 
-template <typename ITERATOR, typename ITEM>
+template <typename ITERATOR>
+class IteratorWithTake
+{
+	typedef typename std::remove_reference<decltype(*std::declval<ITERATOR>())>::type ITEM;
+
+	ITERATOR current;
+	ITERATOR end;
+	std::size_t count;
+
+public:
+	IteratorWithTake(const ITERATOR& current, const ITERATOR& end, std::size_t count)
+		: current(current),
+		  end(end),
+		  count(count) {
+	}
+
+	bool operator!=(const IteratorWithTake<ITERATOR>& other) const {
+		if (count == 0)
+			return end != other.current;
+		else
+			return current != other.current;
+	}
+
+	ITEM operator*() const {
+		return *current;
+	}
+
+	const IteratorWithTake& operator++() {
+		if (count > 1)
+			++current;
+
+		--count;
+
+		return *this;
+	}
+};
+
+
+template <typename ITERATOR>
+class IteratorWithSkip
+{
+	typedef typename std::remove_reference<decltype(*std::declval<ITERATOR>())>::type ITEM;
+
+	mutable ITERATOR current;
+	ITERATOR end;
+	mutable std::size_t count;
+
+public:
+	IteratorWithSkip(const ITERATOR& current, const ITERATOR& end, std::size_t count)
+		: current(current),
+		  end(end),
+		  count(count) {
+	}
+
+	bool operator!=(const IteratorWithSkip<ITERATOR>& other) const {
+		while (count > 0 && current != end) {
+			++current;
+			--count;
+		}
+
+		return current != other.current;
+	}
+
+	ITEM operator*() const {
+		return *current;
+	}
+
+	const IteratorWithSkip& operator++() {
+		++current;
+		return *this;
+	}
+};
+
+
+template <typename ITERATOR>
 class Enumerable
 {
+	typedef typename std::remove_reference<decltype(*std::declval<ITERATOR>())>::type ITEM;
+
 protected:
 	ITERATOR itBegin;
 	ITERATOR itEnd;
@@ -92,20 +170,34 @@ public:
 	}
 
 	template <typename PREDICATE>
-	Enumerable<FitleredIterator<ITERATOR, PREDICATE, ITEM>, ITEM> where(const PREDICATE& predicate) {
-		static_assert(std::is_integral<typename std::result_of<PREDICATE(ITEM)>::type>::value, "PREDICATE must be a function: bool(ITEM)");
+	Enumerable<IteratorWithFilter<ITERATOR, PREDICATE>> where(const PREDICATE& predicate) {
+		static_assert(std::is_same<typename std::result_of<PREDICATE(ITEM)>::type, bool>::value, "PREDICATE must be a function: bool(ITEM)");
 
-		return Enumerable<FitleredIterator<ITERATOR, PREDICATE, ITEM>, ITEM>(
-			FitleredIterator<ITERATOR, PREDICATE, ITEM>(itBegin, itEnd, predicate),
-			FitleredIterator<ITERATOR, PREDICATE, ITEM>(itEnd, itEnd, predicate)
+		return Enumerable<IteratorWithFilter<ITERATOR, PREDICATE>>(
+			IteratorWithFilter<ITERATOR, PREDICATE>(itBegin, itEnd, predicate),
+			IteratorWithFilter<ITERATOR, PREDICATE>(itEnd, itEnd, predicate)
 		);
 	}
 
-	template <typename TRANSFORM, typename NEW_ITEM = typename std::result_of<TRANSFORM(ITEM)>::type>
-	Enumerable<TransformedIterator<ITERATOR, TRANSFORM, NEW_ITEM>, NEW_ITEM> select(TRANSFORM transform) {
-		return Enumerable<TransformedIterator<ITERATOR, TRANSFORM, NEW_ITEM>, NEW_ITEM>(
-			TransformedIterator<ITERATOR, TRANSFORM, NEW_ITEM>(itBegin, itEnd, transform),
-			TransformedIterator<ITERATOR, TRANSFORM, NEW_ITEM>(itEnd, itEnd, transform)
+	template <typename TRANSFORM>
+	Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>> select(TRANSFORM transform) {
+		return Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>>(
+			IteratorWithTransform<ITERATOR, TRANSFORM>(itBegin, transform),
+			IteratorWithTransform<ITERATOR, TRANSFORM>(itEnd, transform)
+		);
+	}
+
+	Enumerable<IteratorWithTake<ITERATOR>> take(std::size_t count) {
+		return Enumerable<IteratorWithTake<ITERATOR>>(
+			IteratorWithTake<ITERATOR>(itBegin, itEnd, count),
+			IteratorWithTake<ITERATOR>(itEnd, itEnd, count)
+		);
+	}
+
+	Enumerable<IteratorWithSkip<ITERATOR>> skip(std::size_t count) {
+		return Enumerable<IteratorWithSkip<ITERATOR>>(
+			IteratorWithSkip<ITERATOR>(itBegin, itEnd, count),
+			IteratorWithSkip<ITERATOR>(itEnd, itEnd, count)
 		);
 	}
 
@@ -123,7 +215,7 @@ public:
 
 	template <typename LIST, typename LIST_ITEM = decltype(*std::declval<LIST>().begin())>
 	void to(LIST& l) {
-		to(std::inserter(l, l.begin()));
+		to(std::inserter(l, l.end()));
 	}
 
 	template <typename OUTPUT_ITERATOR, typename ITERATOR_ITEM = decltype(*std::declval<OUTPUT_ITERATOR>())>
@@ -135,18 +227,18 @@ public:
 	}
 };
 
-template <typename LIST, typename ITERATOR = decltype(std::declval<LIST>().begin()), typename ITEM = typename std::remove_reference<decltype(*std::declval<LIST>().begin())>::type>
-Enumerable<ITERATOR, ITEM> from(LIST& l) {
-	return Enumerable<ITERATOR, ITEM>(l.begin(), l.end());
+template <typename LIST, typename ITERATOR = decltype(std::declval<LIST>().begin())>
+Enumerable<ITERATOR> from(LIST& l) {
+	return Enumerable<ITERATOR>(l.begin(), l.end());
 }
 
 template <typename ITEM, int N>
-Enumerable<ITEM*, ITEM> from(ITEM (&l)[N]) {
+Enumerable<ITEM*> from(ITEM (&l)[N]) {
 	return Enumerable<ITEM*, ITEM>(l, l + N);
 }
 
 template <typename ITEM>
-Enumerable<ITEM*, ITEM> from(ITEM* l, std::size_t len) {
-	return Enumerable<ITEM*, ITEM>(l, l + len);
+Enumerable<ITEM*> from(ITEM* l, std::size_t len) {
+	return Enumerable<ITEM*>(l, l + len);
 }
 }
