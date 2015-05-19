@@ -3,7 +3,6 @@
 #include <type_traits>
 #include <list>
 #include <set>
-#include <utility>
 
 
 namespace clinq
@@ -401,6 +400,40 @@ public:
 		while (enumerator.next()) {
 			action(enumerator.get());
 		}
+	}
+
+	template <typename PREDICATE>
+	bool any(PREDICATE& predicate) {
+		while (enumerator.next()) {
+			if (predicate(enumerator.get()))
+				return true;
+		}
+
+		return false;
+	}
+
+	template <typename PREDICATE>
+	bool all(PREDICATE& predicate) {
+		while (enumerator.next()) {
+			if (!predicate(enumerator.get()))
+				return false;
+		}
+
+		return true;
+	}
+
+	value_type first() {
+		if (!enumerator.next())
+			throw std::exception("no item in result");
+
+		return enumerator.get();
+	}
+
+	value_type first_or_default(value_type&& defaultValue) {
+		if (!enumerator.next())
+			return std::move(defaultValue);
+
+		return enumerator.get();
 	}
 };
 
