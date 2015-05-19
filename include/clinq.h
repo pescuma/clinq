@@ -3,317 +3,371 @@
 #include <type_traits>
 #include <list>
 #include <set>
+#include <utility>
 
 
 namespace clinq
 {
 namespace detail
 {
-template <typename ITERATOR>
+template <typename ENUMERATOR>
 struct iterator_traits
 {
-	typedef decltype(*std::declval<ITERATOR>()) value_type;
+	typedef decltype(*std::declval<ENUMERATOR>()) value_type;
 };
 }
 
-template <typename ITERATOR, typename PREDICATE>
-class IteratorWithFilter
+template <typename ITERATOR>
+class Enumerator
 {
+	bool first;
 	ITERATOR current;
 	ITERATOR end;
-	PREDICATE predicate;
+
+	Enumerator(const Enumerator& other);
+	Enumerator& operator=(const Enumerator& other);
 
 public:
+
 	typedef typename detail::iterator_traits<ITERATOR>::value_type value_type;
-	typedef std::forward_iterator_tag iterator_category;
 
-	IteratorWithFilter(const ITERATOR& current, const ITERATOR& end, const PREDICATE& predicate)
-		: current(current),
-		  end(end),
-		  predicate(predicate) {
+	Enumerator(ITERATOR&& current, ITERATOR&& end)
+		: current(std::move(current)),
+		  end(std::move(end)) {
+		first = true;
 	}
 
-	bool operator!=(const IteratorWithFilter<ITERATOR, PREDICATE>& other) const {
-		return current != other.current;
+	Enumerator(Enumerator&& other)
+		: first(other.first),
+		  current(std::move(other.current)),
+		  end(std::move(other.end)) {
 	}
 
-	value_type operator*() const {
+	bool next() {
+		if (first)
+			first = false;
+		else
+			++current;
+
+		return current != end;
+	}
+
+	value_type get() {
 		return *current;
 	}
+};
 
-	const IteratorWithFilter& operator++() {
-		if (!(current != end))
-			return *this;
+template <typename ENUMERATOR, typename PREDICATE>
+class EnumeratorWithFilter
+{
+	ENUMERATOR inner;
+	PREDICATE predicate;
 
-		do {
-			++current;
-		} while (current != end && !predicate(*current));
+	EnumeratorWithFilter(const EnumeratorWithFilter& other);
+	EnumeratorWithFilter& operator=(const EnumeratorWithFilter& other);
 
-		return *this;
+public:
+
+	typedef typename ENUMERATOR::value_type value_type;
+
+	EnumeratorWithFilter(ENUMERATOR&& inner, PREDICATE&& predicate)
+		: inner(std::move(inner)),
+		  predicate(std::move(predicate)) {
+	}
+
+	EnumeratorWithFilter(EnumeratorWithFilter&& other)
+		: inner(std::move(other.inner)),
+		  predicate(std::move(other.predicate)) {
+	}
+
+	bool next() {
+		while (inner.next()) {
+			if (predicate(inner.get()))
+				return true;
+		}
+
+		return false;
+	}
+
+	value_type get() {
+		return inner.get();
 	}
 };
 
 
-template <typename ITERATOR, typename TRANSFORM>
-class IteratorWithTransform
+template <typename ENUMERATOR, typename TRANSFORM>
+class EnumeratorWithTransform
 {
-	ITERATOR current;
+	ENUMERATOR inner;
+	TRANSFORM transform;
+
+	EnumeratorWithTransform(const EnumeratorWithTransform& other);
+	EnumeratorWithTransform& operator=(const EnumeratorWithTransform& other);
+
+public:
+
+	typedef typename std::result_of<TRANSFORM(typename ENUMERATOR::value_type)>::type value_type;
+
+	EnumeratorWithTransform(ENUMERATOR&& inner, TRANSFORM&& transform)
+		: inner(std::move(inner)),
+		  transform(std::move(transform)) {
+	}
+
+	EnumeratorWithTransform(EnumeratorWithTransform&& other)
+		: inner(std::move(other.inner)),
+		  transform(std::move(other.transform)) {
+	}
+
+
+	bool next() {
+		return inner.next();
+	}
+
+	value_type get() {
+		return transform(inner.get());
+	}
+};
+
+
+template <typename ENUMERATOR, typename TRANSFORM>
+class EnumeratorWithSelectMany
+{
+	ENUMERATOR inner;
 	TRANSFORM transform;
 
 public:
-	typedef typename std::result_of<TRANSFORM(typename detail::iterator_traits<ITERATOR>::value_type)>::type value_type;
-	typedef std::forward_iterator_tag iterator_category;
 
-	IteratorWithTransform(const ITERATOR& current, const TRANSFORM& transform)
-		: current(current),
-		  transform(transform) {
-	}
-
-	bool operator!=(const IteratorWithTransform<ITERATOR, TRANSFORM>& other) const {
-		return current != other.current;
-	}
-
-	value_type operator*() const {
-		return transform(*current);
-	}
-
-	const IteratorWithTransform& operator++() {
-		++current;
-		return *this;
-	}
-};
-
-
-template <typename ITERATOR, typename TRANSFORM>
-class IteratorWithSelectMany
-{
-public:
-	typedef typename std::result_of<TRANSFORM(decltype(*std::declval<ITERATOR>()))>::type list_type;
+	typedef typename std::result_of<TRANSFORM(typename ENUMERATOR::value_type)>::type list_type;
 	typedef decltype(std::declval<list_type>().begin()) list_iterator_type;
 	typedef typename detail::iterator_traits<list_iterator_type>::value_type value_type;
-	typedef std::forward_iterator_tag iterator_category;
 
 private:
-	mutable ITERATOR current;
-	ITERATOR end;
-	TRANSFORM transform;
 
-	struct Inner
+	struct SubList
 	{
-		list_type&& list;
-		list_iterator_type current;
+		list_type list;
+		Enumerator<list_iterator_type> enumerator;
 
-		Inner(list_type&& list)
-			: list(std::move(list)) {
-			current = this->list.begin();
+		SubList(list_type&& list)
+			: list(std::move(list)),
+			  enumerator(this->list.begin(), this->list.end()) {
 		}
 
-		Inner() {
-		}
-
-		bool hasMoreData() {
-			return current != list.end();
+		SubList() {
 		}
 	};
 
-	mutable std::unique_ptr<Inner> inner;
+	std::unique_ptr<SubList> sub;
 
-	void moveNextOuter() const {
-		if (!(current != end))
-			return;
-
-		do {
-			inner = std::unique_ptr<Inner>(new Inner(transform(*current)));
-			++current;
-		} while (current != end && !inner->hasMoreData());
-	}
+	EnumeratorWithSelectMany(const EnumeratorWithSelectMany& other);
+	EnumeratorWithSelectMany& operator=(const EnumeratorWithSelectMany& other);
 
 public:
-	IteratorWithSelectMany(const ITERATOR& current, const ITERATOR& end, const TRANSFORM& transform)
-		: current(current),
-		  end(end),
-		  transform(transform) {
-		list_iterator_type i;
 
+	EnumeratorWithSelectMany(ENUMERATOR&& inner, TRANSFORM&& transform)
+		: inner(std::move(inner)),
+		  transform(std::move(transform)) {
 	}
 
-	IteratorWithSelectMany(const IteratorWithSelectMany& other)
-		: current(other.current),
-		  end(other.end),
-		  transform(other.transform) {
+	EnumeratorWithSelectMany(EnumeratorWithSelectMany&& other)
+		: inner(std::move(other.inner)),
+		  transform(std::move(other.transform)) {
+		std::swap(sub, other.sub);
 	}
 
-	IteratorWithSelectMany(IteratorWithSelectMany&& other)
-		: current(std::move(other.current)),
-		  end(std::move(other.end)),
-		  transform(std::move(other.transform)),
-		  inner(std::move(other.inner)) {
+	bool next() {
+		if (sub != nullptr && sub->enumerator.next())
+			return true;
+
+		while (inner.next()) {
+			sub = std::unique_ptr<SubList>(new SubList(transform(inner.get())));
+			if (sub->enumerator.next())
+				return true;
+		}
+
+		return false;
 	}
 
-	~IteratorWithSelectMany() {
-	}
-
-	bool operator!=(const IteratorWithSelectMany<ITERATOR, TRANSFORM>& other) const {
-		if (inner == nullptr)
-			moveNextOuter();
-
-		if (inner->hasMoreData())
-			return false;
-
-		return current != other.current;
-	}
-
-	value_type operator*() const {
-		return *inner->current;
-	}
-
-	const IteratorWithSelectMany& operator++() {
-		++inner->current;
-
-		if (!inner->hasMoreData())
-			moveNextOuter();
-
-		return *this;
+	value_type get() {
+		return sub->enumerator.get();
 	}
 };
 
 
-template <typename ITERATOR>
-class IteratorWithTake
+template <typename ENUMERATOR>
+class EnumeratorWithTake
 {
-	ITERATOR current;
-	ITERATOR end;
+	ENUMERATOR inner;
 	std::size_t count;
 
-public:
-	typedef typename detail::iterator_traits<ITERATOR>::value_type value_type;
-	typedef std::forward_iterator_tag iterator_category;
+	EnumeratorWithTake(const EnumeratorWithTake& other);
+	EnumeratorWithTake& operator=(const EnumeratorWithTake& other);
 
-	IteratorWithTake(const ITERATOR& current, const ITERATOR& end, std::size_t count)
-		: current(current),
-		  end(end),
+public:
+
+	typedef typename ENUMERATOR::value_type value_type;
+
+	EnumeratorWithTake(ENUMERATOR&& inner, std::size_t count)
+		: inner(std::move(inner)),
 		  count(count) {
 	}
 
-	bool operator!=(const IteratorWithTake<ITERATOR>& other) const {
-		if (count == 0)
-			return end != other.current;
-		else
-			return current != other.current;
+	EnumeratorWithTake(EnumeratorWithTake&& other)
+		: inner(std::move(other.inner)),
+		  count(other.count) {
 	}
 
-	value_type operator*() const {
-		return *current;
-	}
-
-	const IteratorWithTake& operator++() {
-		if (count > 1)
-			++current;
+	bool next() {
+		if (count < 1)
+			return false;
 
 		--count;
+		return inner.next();
+	}
 
-		return *this;
+	value_type get() {
+		return inner.get();
 	}
 };
 
 
-template <typename ITERATOR>
-class IteratorWithSkip
+template <typename ENUMERATOR>
+class EnumeratorWithSkip
 {
-	mutable ITERATOR current;
-	ITERATOR end;
-	mutable std::size_t count;
+	ENUMERATOR inner;
+	std::size_t count;
+
+	EnumeratorWithSkip(const EnumeratorWithSkip& other);
+	EnumeratorWithSkip& operator=(const EnumeratorWithSkip& other);
 
 public:
-	typedef typename detail::iterator_traits<ITERATOR>::value_type value_type;
-	typedef std::forward_iterator_tag iterator_category;
 
-	IteratorWithSkip(const ITERATOR& current, const ITERATOR& end, std::size_t count)
-		: current(current),
-		  end(end),
+	typedef typename ENUMERATOR::value_type value_type;
+
+	EnumeratorWithSkip(ENUMERATOR&& inner, std::size_t count)
+		: inner(std::move(inner)),
 		  count(count) {
 	}
 
-	bool operator!=(const IteratorWithSkip<ITERATOR>& other) const {
-		while (count > 0 && current != end) {
-			++current;
+	EnumeratorWithSkip(EnumeratorWithSkip&& other)
+		: inner(std::move(other.inner)),
+		  count(other.count) {
+	}
+
+	bool next() {
+		while (count > 0) {
+			if (!inner.next())
+				return false;
+
 			--count;
 		}
 
-		return current != other.current;
+		return inner.next();
 	}
 
-	value_type operator*() const {
-		return *current;
-	}
-
-	const IteratorWithSkip& operator++() {
-		++current;
-		return *this;
+	value_type get() {
+		return inner.get();
 	}
 };
 
 
-template <typename ITERATOR>
-class Enumerable
+template <typename ENUMERATOR>
+class Query
 {
-	typedef typename detail::iterator_traits<ITERATOR>::value_type value_type;
-	typedef typename std::remove_cv<typename std::remove_reference<typename detail::iterator_traits<ITERATOR>::value_type>::type>::type simple_value_type;
+	ENUMERATOR enumerator;
 
-	ITERATOR itBegin;
-	ITERATOR itEnd;
+	Query(const Query& other);
+	Query& operator=(const Query& other);
 
 public:
-	Enumerable(ITERATOR&& begin, ITERATOR&& end)
-		: itBegin(std::move(begin)),
-		  itEnd(std::move(end)) {
+
+	typedef typename ENUMERATOR::value_type value_type;
+	typedef typename std::remove_cv<typename std::remove_reference<value_type>::type>::type simple_value_type;
+
+	explicit Query(ENUMERATOR&& enumerator)
+		: enumerator(std::move(enumerator)) {
 	}
 
-	ITERATOR begin() {
-		return begin;
+	Query(Query&& other)
+		: enumerator(std::move(other.enumerator)) {
 	}
 
-	ITERATOR end() {
-		return end;
+	class iterator
+	{
+		ENUMERATOR* enumerator;
+		mutable bool end;
+		mutable bool first;
+
+	public:
+
+		typedef typename ENUMERATOR::value_type value_type;
+		typedef std::forward_iterator_tag iterator_category;
+
+		iterator(ENUMERATOR* enumerator, bool end)
+			: enumerator(enumerator),
+			  end(end),
+			  first(true) {
+		}
+
+		bool operator!=(const iterator& other) const {
+			if (first && !end) {
+				first = false;
+				end = !enumerator->next();
+			}
+
+			return enumerator != other.enumerator || end != other.end;
+		}
+
+		value_type operator*() const {
+			return enumerator->get();
+		}
+
+		const iterator& operator++() {
+			end = !enumerator->next();
+			return *this;
+		}
+	};
+
+	iterator begin() {
+		return iterator(&enumerator, false);
+	}
+
+	iterator end() {
+		return iterator(&enumerator, true);
 	}
 
 	template <typename PREDICATE>
-	Enumerable<IteratorWithFilter<ITERATOR, PREDICATE>> where(const PREDICATE& predicate) {
+	Query<EnumeratorWithFilter<ENUMERATOR, PREDICATE>> where(PREDICATE&& predicate) {
 		static_assert(std::is_same<typename std::result_of<PREDICATE(value_type)>::type, bool>::value, "PREDICATE must be a function: bool(value_type)");
 
-		return Enumerable<IteratorWithFilter<ITERATOR, PREDICATE>>(
-			IteratorWithFilter<ITERATOR, PREDICATE>(itBegin, itEnd, predicate),
-			IteratorWithFilter<ITERATOR, PREDICATE>(itEnd, itEnd, predicate)
+		return Query<EnumeratorWithFilter<ENUMERATOR, PREDICATE>>(
+			EnumeratorWithFilter<ENUMERATOR, PREDICATE>(std::move(enumerator), std::move(predicate))
 		);
 	}
 
 	template <typename TRANSFORM>
-	Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>> select(const TRANSFORM& transform) {
-		return Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>>(
-			IteratorWithTransform<ITERATOR, TRANSFORM>(itBegin, transform),
-			IteratorWithTransform<ITERATOR, TRANSFORM>(itEnd, transform)
+	Query<EnumeratorWithTransform<ENUMERATOR, TRANSFORM>> select(TRANSFORM&& transform) {
+		return Query<EnumeratorWithTransform<ENUMERATOR, TRANSFORM>>(
+			EnumeratorWithTransform<ENUMERATOR, TRANSFORM>(std::move(enumerator), std::move(transform))
 		);
 	}
 
 	template <typename TRANSFORM>
-	Enumerable<IteratorWithSelectMany<ITERATOR, TRANSFORM>> select_many(const TRANSFORM& transform) {
-		return Enumerable<IteratorWithSelectMany<ITERATOR, TRANSFORM>>(
-			IteratorWithSelectMany<ITERATOR, TRANSFORM>(itBegin, itEnd, transform),
-			IteratorWithSelectMany<ITERATOR, TRANSFORM>(itEnd, itEnd, transform)
+	Query<EnumeratorWithSelectMany<ENUMERATOR, TRANSFORM>> select_many(TRANSFORM&& transform) {
+		return Query<EnumeratorWithSelectMany<ENUMERATOR, TRANSFORM>>(
+			EnumeratorWithSelectMany<ENUMERATOR, TRANSFORM>(std::move(enumerator), std::move(transform))
 		);
 	}
 
-	Enumerable<IteratorWithTake<ITERATOR>> take(std::size_t count) {
-		return Enumerable<IteratorWithTake<ITERATOR>>(
-			IteratorWithTake<ITERATOR>(itBegin, itEnd, count),
-			IteratorWithTake<ITERATOR>(itEnd, itEnd, count)
+	Query<EnumeratorWithTake<ENUMERATOR>> take(std::size_t count) {
+		return Query<EnumeratorWithTake<ENUMERATOR>>(
+			EnumeratorWithTake<ENUMERATOR>(std::move(enumerator), count)
 		);
 	}
 
-	Enumerable<IteratorWithSkip<ITERATOR>> skip(std::size_t count) {
-		return Enumerable<IteratorWithSkip<ITERATOR>>(
-			IteratorWithSkip<ITERATOR>(itBegin, itEnd, count),
-			IteratorWithSkip<ITERATOR>(itEnd, itEnd, count)
+	Query<EnumeratorWithSkip<ENUMERATOR>> skip(std::size_t count) {
+		return Query<EnumeratorWithSkip<ENUMERATOR>>(
+			EnumeratorWithSkip<ENUMERATOR>(std::move(enumerator), count)
 		);
 	}
 
@@ -329,23 +383,24 @@ public:
 		return result;
 	}
 
-	template <typename LIST, typename LIST_value_type = decltype(*std::declval<LIST>().begin())>
+	template <typename LIST>
 	void to(LIST& l) {
 		to(std::inserter(l, l.end()));
 	}
 
-	template <typename OUTPUT_ITERATOR, typename ITERATOR_value_type = decltype(*std::declval<OUTPUT_ITERATOR>())>
+	template <typename OUTPUT_ITERATOR, typename OUTPUT_VALUE_TYPE = typename detail::iterator_traits<OUTPUT_ITERATOR>::value_type>
 	void to(OUTPUT_ITERATOR result) {
-		for (ITERATOR it = itBegin; it != itEnd; ++it) {
-			*result = *it;
+		while (enumerator.next()) {
+			*result = enumerator.get();
 			++result;
 		}
 	}
 
 	template <typename ACTION>
 	void foreach(ACTION action) {
-		for (ITERATOR it = itBegin; it != itEnd; ++it)
-			action(*it);
+		while (enumerator.next()) {
+			action(enumerator.get());
+		}
 	}
 };
 
@@ -354,17 +409,17 @@ public:
 
 
 template <typename LIST, typename ITERATOR = decltype(std::declval<LIST>().begin())>
-Enumerable<ITERATOR> from(LIST& l) {
-	return Enumerable<ITERATOR>(l.begin(), l.end());
+Query<Enumerator<ITERATOR>> from(LIST& l) {
+	return Query<Enumerator<ITERATOR>>(Enumerator<ITERATOR>(l.begin(), l.end()));
 }
 
 template <typename value_type, int N>
-Enumerable<value_type*> from(value_type (&l)[N]) {
-	return Enumerable<value_type*, value_type>(l, l + N);
+Query<Enumerator<value_type*>> from(value_type (&l)[N]) {
+	return Query<Enumerator<value_type*>>(Enumerator<value_type*>(l, l + N));
 }
 
 template <typename value_type>
-Enumerable<value_type*> from(value_type* l, std::size_t len) {
-	return Enumerable<value_type*>(l, l + len);
+Query<Enumerator<value_type*>> from(value_type* l, std::size_t len) {
+	return Query<Enumerator<value_type*>>(Enumerator<value_type*>(l, l + len));
 }
 }
