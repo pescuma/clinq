@@ -370,6 +370,12 @@ public:
 		);
 	}
 
+	std::vector<simple_value_type> to_vector() {
+		std::vector<simple_value_type> result;
+		to(result);
+		return result;
+	}
+
 	std::list<simple_value_type> to_list() {
 		std::list<simple_value_type> result;
 		to(result);
@@ -410,6 +416,10 @@ public:
 		}
 
 		return false;
+	}
+
+	bool any() {
+		return enumerator.next();
 	}
 
 	template <typename PREDICATE>
