@@ -12,7 +12,7 @@ namespace detail
 template <typename ITERATOR>
 struct iterator_traits
 {
-	typedef typename std::remove_reference<decltype(*std::declval<ITERATOR>())>::type value_type;
+	typedef decltype(*std::declval<ITERATOR>()) value_type;
 };
 }
 
@@ -61,10 +61,10 @@ class IteratorWithTransform
 	TRANSFORM transform;
 
 public:
-	typedef typename std::result_of<TRANSFORM(decltype(*std::declval<ITERATOR>()))>::type value_type;
+	typedef typename std::result_of<TRANSFORM(typename detail::iterator_traits<ITERATOR>::value_type)>::type value_type;
 	typedef std::forward_iterator_tag iterator_category;
 
-	IteratorWithTransform(const ITERATOR& current, TRANSFORM transform)
+	IteratorWithTransform(const ITERATOR& current, const TRANSFORM& transform)
 		: current(current),
 		  transform(transform) {
 	}
@@ -79,6 +79,100 @@ public:
 
 	const IteratorWithTransform& operator++() {
 		++current;
+		return *this;
+	}
+};
+
+
+template <typename ITERATOR, typename TRANSFORM>
+class IteratorWithSelectMany
+{
+public:
+	typedef typename std::result_of<TRANSFORM(decltype(*std::declval<ITERATOR>()))>::type list_type;
+	typedef decltype(std::declval<list_type>().begin()) list_iterator_type;
+	typedef typename detail::iterator_traits<list_iterator_type>::value_type value_type;
+	typedef std::forward_iterator_tag iterator_category;
+
+private:
+	mutable ITERATOR current;
+	ITERATOR end;
+	TRANSFORM transform;
+
+	struct Inner
+	{
+		list_type&& list;
+		list_iterator_type current;
+
+		Inner(list_type&& list)
+			: list(std::move(list)) {
+			current = this->list.begin();
+		}
+
+		Inner() {
+		}
+
+		bool hasMoreData() {
+			return current != list.end();
+		}
+	};
+
+	mutable std::unique_ptr<Inner> inner;
+
+	void moveNextOuter() const {
+		if (!(current != end))
+			return;
+
+		do {
+			inner = std::unique_ptr<Inner>(new Inner(transform(*current)));
+			++current;
+		} while (current != end && !inner->hasMoreData());
+	}
+
+public:
+	IteratorWithSelectMany(const ITERATOR& current, const ITERATOR& end, const TRANSFORM& transform)
+		: current(current),
+		  end(end),
+		  transform(transform) {
+		list_iterator_type i;
+
+	}
+
+	IteratorWithSelectMany(const IteratorWithSelectMany& other)
+		: current(other.current),
+		  end(other.end),
+		  transform(other.transform) {
+	}
+
+	IteratorWithSelectMany(IteratorWithSelectMany&& other)
+		: current(std::move(other.current)),
+		  end(std::move(other.end)),
+		  transform(std::move(other.transform)),
+		  inner(std::move(other.inner)) {
+	}
+
+	~IteratorWithSelectMany() {
+	}
+
+	bool operator!=(const IteratorWithSelectMany<ITERATOR, TRANSFORM>& other) const {
+		if (inner == nullptr)
+			moveNextOuter();
+
+		if (inner->hasMoreData())
+			return false;
+
+		return current != other.current;
+	}
+
+	value_type operator*() const {
+		return *inner->current;
+	}
+
+	const IteratorWithSelectMany& operator++() {
+		++inner->current;
+
+		if (!inner->hasMoreData())
+			moveNextOuter();
+
 		return *this;
 	}
 };
@@ -164,14 +258,15 @@ template <typename ITERATOR>
 class Enumerable
 {
 	typedef typename detail::iterator_traits<ITERATOR>::value_type value_type;
+	typedef typename std::remove_cv<typename std::remove_reference<typename detail::iterator_traits<ITERATOR>::value_type>::type>::type simple_value_type;
 
 	ITERATOR itBegin;
 	ITERATOR itEnd;
 
 public:
-	Enumerable(const ITERATOR& begin, const ITERATOR& end)
-		: itBegin(begin),
-		  itEnd(end) {
+	Enumerable(ITERATOR&& begin, ITERATOR&& end)
+		: itBegin(std::move(begin)),
+		  itEnd(std::move(end)) {
 	}
 
 	ITERATOR begin() {
@@ -193,10 +288,18 @@ public:
 	}
 
 	template <typename TRANSFORM>
-	Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>> select(TRANSFORM transform) {
+	Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>> select(const TRANSFORM& transform) {
 		return Enumerable<IteratorWithTransform<ITERATOR, TRANSFORM>>(
 			IteratorWithTransform<ITERATOR, TRANSFORM>(itBegin, transform),
 			IteratorWithTransform<ITERATOR, TRANSFORM>(itEnd, transform)
+		);
+	}
+
+	template <typename TRANSFORM>
+	Enumerable<IteratorWithSelectMany<ITERATOR, TRANSFORM>> select_many(const TRANSFORM& transform) {
+		return Enumerable<IteratorWithSelectMany<ITERATOR, TRANSFORM>>(
+			IteratorWithSelectMany<ITERATOR, TRANSFORM>(itBegin, itEnd, transform),
+			IteratorWithSelectMany<ITERATOR, TRANSFORM>(itEnd, itEnd, transform)
 		);
 	}
 
@@ -214,14 +317,14 @@ public:
 		);
 	}
 
-	std::list<value_type> toList() {
-		std::list<value_type> result;
+	std::list<simple_value_type> to_list() {
+		std::list<simple_value_type> result;
 		to(result);
 		return result;
 	}
 
-	std::set<value_type> toSet() {
-		std::set<value_type> result;
+	std::set<simple_value_type> to_set() {
+		std::set<simple_value_type> result;
 		to(result);
 		return result;
 	}
