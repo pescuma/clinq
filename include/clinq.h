@@ -3,16 +3,17 @@
 #include <type_traits>
 #include <list>
 #include <set>
+#include <memory>
 
 
 namespace clinq
 {
 namespace detail
 {
-template <typename ENUMERATOR>
+template <typename ITERATOR>
 struct iterator_traits
 {
-	typedef decltype(*std::declval<ENUMERATOR>()) value_type;
+	typedef decltype(*std::declval<ITERATOR>()) value_type;
 };
 }
 
@@ -270,6 +271,68 @@ public:
 };
 
 
+template <typename ENUMERATOR, typename T>
+class EnumeratorWithStaticCast
+{
+	ENUMERATOR inner;
+
+	EnumeratorWithStaticCast(const EnumeratorWithStaticCast& other);
+	EnumeratorWithStaticCast& operator=(const EnumeratorWithStaticCast& other);
+
+public:
+
+	typedef T value_type;
+
+	EnumeratorWithStaticCast(ENUMERATOR&& inner)
+		: inner(std::move(inner)) {
+	}
+
+	EnumeratorWithStaticCast(EnumeratorWithStaticCast&& other)
+		: inner(std::move(other.inner)) {
+	}
+
+
+	bool next() {
+		return inner.next();
+	}
+
+	value_type get() {
+		return static_cast<T>(inner.get());
+	}
+};
+
+
+template <typename ENUMERATOR, typename T>
+class EnumeratorWithDynamicCast
+{
+	ENUMERATOR inner;
+
+	EnumeratorWithDynamicCast(const EnumeratorWithDynamicCast& other);
+	EnumeratorWithDynamicCast& operator=(const EnumeratorWithDynamicCast& other);
+
+public:
+
+	typedef T value_type;
+
+	EnumeratorWithDynamicCast(ENUMERATOR&& inner)
+		: inner(std::move(inner)) {
+	}
+
+	EnumeratorWithDynamicCast(EnumeratorWithDynamicCast&& other)
+		: inner(std::move(other.inner)) {
+	}
+
+
+	bool next() {
+		return inner.next();
+	}
+
+	value_type get() {
+		return dynamic_cast<T>(inner.get());
+	}
+};
+
+
 template <typename ENUMERATOR>
 class Query
 {
@@ -370,6 +433,20 @@ public:
 		);
 	}
 
+	template <typename T>
+	Query<EnumeratorWithStaticCast<ENUMERATOR, T>> cast_static() {
+		return Query<EnumeratorWithStaticCast<ENUMERATOR, T>>(
+			EnumeratorWithStaticCast<ENUMERATOR, T>(std::move(enumerator))
+		);
+	}
+
+	template <typename T>
+	Query<EnumeratorWithDynamicCast<ENUMERATOR, T>> cast_dynamic() {
+		return Query<EnumeratorWithDynamicCast<ENUMERATOR, T>>(
+			EnumeratorWithDynamicCast<ENUMERATOR, T>(std::move(enumerator))
+		);
+	}
+
 	std::vector<simple_value_type> to_vector() {
 		std::vector<simple_value_type> result;
 		to(result);
@@ -393,7 +470,7 @@ public:
 		to(std::inserter(l, l.end()));
 	}
 
-	template <typename OUTPUT_ITERATOR, typename OUTPUT_VALUE_TYPE = typename detail::iterator_traits<OUTPUT_ITERATOR>::value_type>
+	template <typename OUTPUT_ITERATOR, typename OUTPUT_VALUE_TYPE = decltype(*std::declval<OUTPUT_ITERATOR>())>
 	void to(OUTPUT_ITERATOR result) {
 		while (enumerator.next()) {
 			*result = enumerator.get();
@@ -439,9 +516,31 @@ public:
 		return enumerator.get();
 	}
 
-	value_type first_or_default(value_type&& defaultValue) {
+	simple_value_type first_or_default(const simple_value_type& defaultValue) {
+		if (!enumerator.next())
+			return defaultValue;
+
+		return enumerator.get();
+	}
+
+	simple_value_type first_or_default(simple_value_type&& defaultValue) {
 		if (!enumerator.next())
 			return std::move(defaultValue);
+
+		return enumerator.get();
+	}
+
+	template <class = typename std::enable_if<std::is_reference<value_type>::value>::type>
+	value_type first_or_default(value_type defaultValue) {
+		if (!enumerator.next())
+			return defaultValue;
+
+		return enumerator.get();
+	}
+
+	value_type first_or_default() {
+		if (!enumerator.next())
+			return value_type();
 
 		return enumerator.get();
 	}

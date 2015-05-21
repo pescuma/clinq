@@ -26,3 +26,15 @@
 *.exe
 *.out
 *.app
+
+# VS files
+*.sdf
+*.opensdf
+*.suo
+*.user
+
+x64/
+Debug/
+Release/
+/packages/
+/ipch/
