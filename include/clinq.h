@@ -15,7 +15,6 @@ struct iterator_traits
 {
 	typedef decltype(*std::declval<ITERATOR>()) value_type;
 };
-}
 
 template <typename ITERATOR>
 class Enumerator
@@ -29,7 +28,7 @@ class Enumerator
 
 public:
 
-	typedef typename detail::iterator_traits<ITERATOR>::value_type value_type;
+	typedef typename iterator_traits<ITERATOR>::value_type value_type;
 
 	Enumerator(ITERATOR&& current, ITERATOR&& end)
 		: current(std::move(current)),
@@ -139,7 +138,7 @@ public:
 
 	typedef typename std::result_of<TRANSFORM(typename ENUMERATOR::value_type)>::type list_type;
 	typedef decltype(std::declval<list_type>().begin()) list_iterator_type;
-	typedef typename detail::iterator_traits<list_iterator_type>::value_type value_type;
+	typedef typename iterator_traits<list_iterator_type>::value_type value_type;
 
 private:
 
@@ -545,23 +544,30 @@ public:
 		return enumerator.get();
 	}
 };
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 template <typename LIST, typename ITERATOR = decltype(std::declval<LIST>().begin())>
-Query<Enumerator<ITERATOR>> from(LIST& l) {
-	return Query<Enumerator<ITERATOR>>(Enumerator<ITERATOR>(l.begin(), l.end()));
+detail::Query<detail::Enumerator<ITERATOR>> from(LIST& l) {
+	return detail::Query<detail::Enumerator<ITERATOR>>(
+		detail::Enumerator<ITERATOR>(l.begin(), l.end())
+	);
 }
 
 template <typename value_type, int N>
-Query<Enumerator<value_type*>> from(value_type (&l)[N]) {
-	return Query<Enumerator<value_type*>>(Enumerator<value_type*>(l, l + N));
+detail::Query<detail::Enumerator<value_type*>> from(value_type (&l)[N]) {
+	return detail::Query<detail::Enumerator<value_type*>>(
+		detail::Enumerator<value_type*>(l, l + N)
+	);
 }
 
 template <typename value_type>
-Query<Enumerator<value_type*>> from(value_type* l, std::size_t len) {
-	return Query<Enumerator<value_type*>>(Enumerator<value_type*>(l, l + len));
+detail::Query<detail::Enumerator<value_type*>> from(value_type* l, std::size_t len) {
+	return detail::Query<detail::Enumerator<value_type*>>(
+		detail::Enumerator<value_type*>(l, l + len)
+	);
 }
 }
