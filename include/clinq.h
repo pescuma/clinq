@@ -56,14 +56,23 @@ public:
 	}
 };
 
+
+class no_copy
+{
+	no_copy(const no_copy& other);
+	no_copy& operator=(const no_copy& other);
+
+public:
+	no_copy() {
+	}
+};
+
+
 template <typename ENUMERATOR, typename PREDICATE>
-class EnumeratorWithFilter
+class EnumeratorWithFilter : no_copy
 {
 	ENUMERATOR inner;
 	PREDICATE predicate;
-
-	EnumeratorWithFilter(const EnumeratorWithFilter& other);
-	EnumeratorWithFilter& operator=(const EnumeratorWithFilter& other);
 
 public:
 
@@ -95,13 +104,10 @@ public:
 
 
 template <typename ENUMERATOR, typename TRANSFORM>
-class EnumeratorWithTransform
+class EnumeratorWithTransform : no_copy
 {
 	ENUMERATOR inner;
 	TRANSFORM transform;
-
-	EnumeratorWithTransform(const EnumeratorWithTransform& other);
-	EnumeratorWithTransform& operator=(const EnumeratorWithTransform& other);
 
 public:
 
@@ -129,7 +135,7 @@ public:
 
 
 template <typename ENUMERATOR, typename TRANSFORM>
-class EnumeratorWithSelectMany
+class EnumeratorWithSelectMany : no_copy
 {
 	ENUMERATOR inner;
 	TRANSFORM transform;
@@ -157,9 +163,6 @@ private:
 	};
 
 	std::unique_ptr<SubList> sub;
-
-	EnumeratorWithSelectMany(const EnumeratorWithSelectMany& other);
-	EnumeratorWithSelectMany& operator=(const EnumeratorWithSelectMany& other);
 
 public:
 
@@ -194,13 +197,10 @@ public:
 
 
 template <typename ENUMERATOR>
-class EnumeratorWithTake
+class EnumeratorWithTake : no_copy
 {
 	ENUMERATOR inner;
 	std::size_t count;
-
-	EnumeratorWithTake(const EnumeratorWithTake& other);
-	EnumeratorWithTake& operator=(const EnumeratorWithTake& other);
 
 public:
 
@@ -231,13 +231,10 @@ public:
 
 
 template <typename ENUMERATOR>
-class EnumeratorWithSkip
+class EnumeratorWithSkip : no_copy
 {
 	ENUMERATOR inner;
 	std::size_t count;
-
-	EnumeratorWithSkip(const EnumeratorWithSkip& other);
-	EnumeratorWithSkip& operator=(const EnumeratorWithSkip& other);
 
 public:
 
@@ -271,12 +268,9 @@ public:
 
 
 template <typename ENUMERATOR, typename T>
-class EnumeratorWithStaticCast
+class EnumeratorWithStaticCast : no_copy
 {
 	ENUMERATOR inner;
-
-	EnumeratorWithStaticCast(const EnumeratorWithStaticCast& other);
-	EnumeratorWithStaticCast& operator=(const EnumeratorWithStaticCast& other);
 
 public:
 
@@ -302,12 +296,9 @@ public:
 
 
 template <typename ENUMERATOR, typename T>
-class EnumeratorWithDynamicCast
+class EnumeratorWithDynamicCast : no_copy
 {
 	ENUMERATOR inner;
-
-	EnumeratorWithDynamicCast(const EnumeratorWithDynamicCast& other);
-	EnumeratorWithDynamicCast& operator=(const EnumeratorWithDynamicCast& other);
 
 public:
 
@@ -333,12 +324,9 @@ public:
 
 
 template <typename ENUMERATOR>
-class Query
+class Query : no_copy
 {
 	ENUMERATOR enumerator;
-
-	Query(const Query& other);
-	Query& operator=(const Query& other);
 
 public:
 
