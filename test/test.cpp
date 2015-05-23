@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <clinq.h>
+#include <chrono>
+#include <stdlib.h> 
 
 using namespace clinq;
 using namespace std;
@@ -479,4 +481,94 @@ TEST(clinq, first_or_default_non_ref_list_object_no_item) {
 	EXPECT_EQ(0, Helper::constructed);
 	EXPECT_EQ(1, Helper::copied);
 	EXPECT_EQ(0, Helper::moved);
+}
+
+template <typename FUNC>
+long profile(FUNC f) {
+	auto t1 = chrono::high_resolution_clock::now();
+	f();
+	auto t2 = chrono::high_resolution_clock::now();
+
+	return (long) chrono::duration_cast<chrono::milliseconds>(t2 - t1).count();
+}
+
+long x(long a) {
+	return a;
+}
+
+#define INTERS 100000
+
+TEST(performance, simple_for) {
+	vector<long> l(INTERS);
+	for (long i = 0; i < INTERS; i++)
+		l.push_back(i);
+
+	auto orig = profile([&]() {
+		long result = 0;
+		for (auto i : l)
+			result += i;
+		return result;
+	});
+
+	auto clinq = profile([&]() {
+		long result = 0;
+		for (auto i : from(l))
+			result += i;
+		return result;
+	});
+
+	EXPECT_LE(clinq, orig * 1.6);
+}
+
+TEST(performance, select) {
+	vector<long> l(INTERS);
+	for (long i = 0; i < INTERS; i++)
+		l.push_back(i);
+
+	auto orig = profile([&]() {
+		long result = 0;
+		for (auto i : l)
+			result += i;
+		return result;
+	});
+
+	auto clinq = profile([&]() {
+		long result = 0;
+		for (auto i : from(l).select([](long& x) {
+			     return x - 1;
+		     }))
+			result += i;
+		return result;
+	});
+
+	EXPECT_LE(clinq, orig * 1.6);
+}
+
+TEST(performance, select_many) {
+	vector<vector<long>> l(INTERS / 10);
+	for (long i = 0; i < INTERS / 10; i++) {
+		l.push_back(vector<long>());
+		vector<long>& v = l.back();
+		for (int i = 0; i < 10; i++)
+			v.push_back(i);
+	}
+
+	auto orig = profile([&]() {
+		long result = 0;
+		for (auto v : l)
+			for (auto i : v)
+				result += i;
+		return result;
+	});
+
+	auto clinq = profile([&]() {
+		long result = 0;
+		for (auto i : from(l).select_many([](vector<long>& x) {
+			     return x;
+		     }))
+			result += i;
+		return result;
+	});
+
+	EXPECT_LE(clinq, orig * 2);
 }
